@@ -388,8 +388,8 @@ class FastSAMPrompt:
         mask_h, mask_w = annotations[0]['segmentation'].shape
         if ori_w != mask_w or ori_h != mask_h:
             image = image.resize((mask_w, mask_h))
-        cropped_boxes = []
         cropped_images = []
+        cropped_boxes = []
         not_crop = []
         filter_id = []
         # annotations, _ = filter_masks(annotations)
@@ -398,12 +398,13 @@ class FastSAMPrompt:
             if np.sum(mask['segmentation']) <= 100:
                 filter_id.append(_)
                 continue
+            # TODO: use mask to crop image
             bbox = self._get_bbox_from_mask(mask['segmentation'])  # mask 的 bbox
-            cropped_boxes.append(self._segment_image(image, bbox))  
+            cropped_images.append(self._segment_image(image, bbox))  
             # cropped_boxes.append(segment_image(image,mask["segmentation"]))
-            cropped_images.append(bbox)  # Save the bounding box of the cropped image.
+            cropped_boxes.append(bbox)  # Save the bounding box of the cropped image.
 
-        return cropped_boxes, cropped_images, not_crop, filter_id, annotations
+        return cropped_images, cropped_boxes, not_crop, filter_id, annotations
 
     def box_prompt(self, bbox=None, bboxes=None):
         if self.results == None:
@@ -479,10 +480,10 @@ class FastSAMPrompt:
            check_requirements('git+https://github.com/openai/CLIP.git')  # required before installing lap from source
            import clip
         format_results = self._format_results(self.results[0], 0)
-        cropped_boxes, cropped_images, not_crop, filter_id, annotations = self._crop_image(format_results)
+        cropped_images, cropped_boxes, not_crop, filter_id, annotations = self._crop_image(format_results)
         annotations = [annotations[i] for i in range(len(annotations)) if i not in filter_id]
         clip_model, preprocess = clip.load('ViT-B/32', device=self.device)
-        scores = self.retrieve(clip_model, preprocess, cropped_boxes, text, device=self.device)
+        scores = self.retrieve(clip_model, preprocess, cropped_images, text, device=self.device)
         
         anno_cnt = len(scores)
         
@@ -511,10 +512,9 @@ class FastSAMPrompt:
         # top 50%
         threshold = 0.8/anno_cnt
         selected = [idx for idx in kept_idx if scores[idx] > threshold]
-        print(selected)
         
         return np.array([masks[i] for i in selected]), \
-               np.array([cropped_images[i] for i in selected]) , \
+               np.array([cropped_boxes[i] for i in selected]), \
                np.array([scores[i] for i in selected])
         # max_idx = scores.argsort()
         # max_idx = max_idx[-1]
