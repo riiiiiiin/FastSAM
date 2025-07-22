@@ -256,9 +256,9 @@ class FastSAMPrompt:
                 bbox = self._get_bbox_from_mask(annotation[i])
                 x1, y1, x2, y2 = bbox
                 ax.text(
-                    x1, y1 - 5, f"{score:.2f}",
+                    x1 + 2, y1 + 11, f"{score:.2f}",
                     color='b',
-                    fontsize=10,
+                    fontsize=8,
                 )
                 ax.add_patch(plt.Rectangle((x1, y1), x2 - x1, y2 - y1, fill=False, edgecolor='b', linewidth=1))
         
@@ -329,9 +329,9 @@ class FastSAMPrompt:
                 bbox = self._get_bbox_from_mask(annotation[i])
                 x1, y1, x2, y2 = bbox
                 ax.text(
-                    x1, y1 - 5, f"{score:.2f}",
+                    x1 + 2, y1 + 11, f"{score:.2f}",
                     color='b',
-                    fontsize=10,
+                    fontsize=8,
                 )
                 ax.add_patch(plt.Rectangle((x1, y1), x2 - x1, y2 - y1, fill=False, edgecolor='b', linewidth=1))
         
@@ -482,11 +482,38 @@ class FastSAMPrompt:
         cropped_boxes, cropped_images, not_crop, filter_id, annotations = self._crop_image(format_results)
         clip_model, preprocess = clip.load('ViT-B/32', device=self.device)
         scores = self.retrieve(clip_model, preprocess, cropped_boxes, text, device=self.device)
-        # todo: use dynamic threshold, instead of top-K
-        # todo: NMS
-        sorted_idx = scores.argsort()[-5:]
+        
+        # NMS
+        tau_Ioi = 0.5
+        tau_IoU = 0.3
+        score_sorted_idx = scores.argsort()
+        area_sorted_idx = np.argsort([np.sum(np.array(annotations[i]['segmentation'])) for i in score_sorted_idx])
+        kept_idx = []
+        for idx in area_sorted_idx:
+            mask = np.array(annotations[idx]['segmentation'])
+            area = np.sum(mask)
+            should_keep = True
+            for j in kept_idx:
+                mask_j = np.array(annotations[j]['segmentation'])
+                area_j = np.sum(mask_j)
+                area_inter = np.sum(mask & mask_j)
+                Ioi = area_inter * 1.0 / area
+                if Ioi > tau_Ioi:
+                    should_keep = False
+                    break
+                IoU = area_inter * 1.0 / (area + area_j - area_inter)
+                if IoU > tau_IoU:
+                    should_keep = False
+                    break
+            if should_keep:
+                kept_idx.append(idx)
+        
+        # top 50%
+        threshold = 1.0/len(score_sorted_idx)
+        score_sorted_idx = [idx for idx in score_sorted_idx if scores[idx] > threshold and idx in kept_idx]
+        
         shifted_idx = []
-        for idx in sorted_idx:
+        for idx in score_sorted_idx:
             idx += sum(np.array(filter_id) <= int(idx))
             shifted_idx.append(idx)
             
