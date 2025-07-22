@@ -96,7 +96,7 @@ def main(args):
             ann = prompt_process.box_prompt(bboxes=args.box_prompt)
             bboxes = args.box_prompt
     elif args.text_prompt != None:
-        ann, scores = prompt_process.text_prompt(text=args.text_prompt)
+        ann, bboxes, scores = prompt_process.text_prompt(text=args.text_prompt)
     elif args.point_prompt[0] != [0, 0]:
         ann = prompt_process.point_prompt(
             points=args.point_prompt, pointlabel=args.point_label

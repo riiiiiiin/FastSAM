@@ -251,9 +251,9 @@ class FastSAMPrompt:
         # Use vectorized indexing to update the values of 'show'.
         show[h_indices, w_indices, :] = mask_image[indices]
         
-        if scores is not None and annotation is not None:
+        if scores is not None and bboxes is not None:
             for i, score in enumerate(scores):
-                bbox = self._get_bbox_from_mask(annotation[i])
+                bbox = bboxes[i]
                 x1, y1, x2, y2 = bbox
                 ax.text(
                     x1 + 2, y1 + 11, f"{score:.2f}",
@@ -324,9 +324,9 @@ class FastSAMPrompt:
         # Use vectorized indexing to update the values of 'show'.
         show[h_indices, w_indices, :] = mask_image[indices]
         show_cpu = show.cpu().numpy()
-        if scores is not None and annotation is not None:
+        if scores is not None and bboxes is not None:
             for i, score in enumerate(scores):
-                bbox = self._get_bbox_from_mask(annotation[i])
+                bbox = bboxes[i]
                 x1, y1, x2, y2 = bbox
                 ax.text(
                     x1 + 2, y1 + 11, f"{score:.2f}",
@@ -480,44 +480,42 @@ class FastSAMPrompt:
            import clip
         format_results = self._format_results(self.results[0], 0)
         cropped_boxes, cropped_images, not_crop, filter_id, annotations = self._crop_image(format_results)
+        annotations = [annotations[i] for i in range(len(annotations)) if i not in filter_id]
         clip_model, preprocess = clip.load('ViT-B/32', device=self.device)
         scores = self.retrieve(clip_model, preprocess, cropped_boxes, text, device=self.device)
+        
+        anno_cnt = len(scores)
         
         # NMS
         tau_Ioi = 0.5
         tau_IoU = 0.3
-        score_sorted_idx = scores.argsort()
-        area_sorted_idx = np.argsort([np.sum(np.array(annotations[i]['segmentation'])) for i in score_sorted_idx])
         kept_idx = []
+        masks = np.array([annotation['segmentation'] for annotation in annotations])
+        areas = np.array([np.sum(mask) for mask in masks])
+        area_sorted_idx = reversed(areas.argsort())
         for idx in area_sorted_idx:
-            mask = np.array(annotations[idx]['segmentation'])
-            area = np.sum(mask)
             should_keep = True
             for j in kept_idx:
-                mask_j = np.array(annotations[j]['segmentation'])
-                area_j = np.sum(mask_j)
-                area_inter = np.sum(mask & mask_j)
-                Ioi = area_inter * 1.0 / area
+                area_inter = np.sum(masks[idx] & masks[j])
+                Ioi = area_inter * 1.0 / areas[idx]
                 if Ioi > tau_Ioi:
                     should_keep = False
                     break
-                IoU = area_inter * 1.0 / (area + area_j - area_inter)
+                IoU = area_inter * 1.0 / (areas[idx] + areas[j] - area_inter)
                 if IoU > tau_IoU:
                     should_keep = False
                     break
             if should_keep:
                 kept_idx.append(idx)
-        
+                
         # top 50%
-        threshold = 1.0/len(score_sorted_idx)
-        score_sorted_idx = [idx for idx in score_sorted_idx if scores[idx] > threshold and idx in kept_idx]
+        threshold = 0.8/anno_cnt
+        selected = [idx for idx in kept_idx if scores[idx] > threshold]
+        print(selected)
         
-        shifted_idx = []
-        for idx in score_sorted_idx:
-            idx += sum(np.array(filter_id) <= int(idx))
-            shifted_idx.append(idx)
-            
-        return np.array([annotations[i]['segmentation'] for i in shifted_idx]), np.array([scores[i] for i in shifted_idx])
+        return np.array([masks[i] for i in selected]), \
+               np.array([cropped_images[i] for i in selected]) , \
+               np.array([scores[i] for i in selected])
         # max_idx = scores.argsort()
         # max_idx = max_idx[-1]
         # max_idx += sum(np.array(filter_id) <= int(max_idx))
