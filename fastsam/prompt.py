@@ -17,19 +17,18 @@ class FastSAMPrompt:
         self.results = results
         self.img = image
     
-    def _segment_image(self, image, bbox):
+    def _segment_image(self, image, mask):
         if isinstance(image, Image.Image):
             image_array = np.array(image)
         else:
             image_array = image
         segmented_image_array = np.zeros_like(image_array)
-        x1, y1, x2, y2 = bbox
-        segmented_image_array[y1:y2, x1:x2] = image_array[y1:y2, x1:x2]
+        segmented_image_array[mask == 1] = image_array[mask == 1]
         segmented_image = Image.fromarray(segmented_image_array)
         black_image = Image.new('RGB', image.size, (255, 255, 255))
         # transparency_mask = np.zeros_like((), dtype=np.uint8)
         transparency_mask = np.zeros((image_array.shape[0], image_array.shape[1]), dtype=np.uint8)
-        transparency_mask[y1:y2, x1:x2] = 255
+        transparency_mask[mask == 1] = 255
         transparency_mask_image = Image.fromarray(transparency_mask, mode='L')
         black_image.paste(segmented_image, mask=transparency_mask_image)
         return black_image
@@ -400,7 +399,7 @@ class FastSAMPrompt:
                 continue
             # TODO: use mask to crop image
             bbox = self._get_bbox_from_mask(mask['segmentation'])  # mask 的 bbox
-            cropped_images.append(self._segment_image(image, bbox))  
+            cropped_images.append(self._segment_image(image, mask['segmentation']))  
             # cropped_boxes.append(segment_image(image,mask["segmentation"]))
             cropped_boxes.append(bbox)  # Save the bounding box of the cropped image.
 
