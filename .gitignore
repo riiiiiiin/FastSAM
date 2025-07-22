@@ -4,6 +4,8 @@
 .DS_Store
 .idea
 weights
+images
+output
 build/
 *.egg-info/
 gradio_cached_examples

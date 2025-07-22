@@ -85,6 +85,7 @@ class FastSAMPrompt:
 
     def plot_to_result(self,
              annotations,
+             scores=None,
              bboxes=None,
              points=None,
              point_label=None,
@@ -114,12 +115,13 @@ class FastSAMPrompt:
             for i, mask in enumerate(annotations):
                 mask = cv2.morphologyEx(mask.astype(np.uint8), cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8))
                 annotations[i] = cv2.morphologyEx(mask.astype(np.uint8), cv2.MORPH_OPEN, np.ones((8, 8), np.uint8))
-        if self.device == 'cpu':
+        if self.device.type == 'cpu':
             annotations = np.array(annotations)
             self.fast_show_mask(
                 annotations,
                 plt.gca(),
                 random_color=mask_random_color,
+                scores=scores,
                 bboxes=bboxes,
                 points=points,
                 pointlabel=point_label,
@@ -134,6 +136,7 @@ class FastSAMPrompt:
                 annotations,
                 plt.gca(),
                 random_color=mask_random_color,
+                scores=scores,
                 bboxes=bboxes,
                 points=points,
                 pointlabel=point_label,
@@ -183,6 +186,7 @@ class FastSAMPrompt:
     def plot(self,
              annotations,
              output_path,
+             scores=None,
              bboxes=None,
              points=None,
              point_label=None,
@@ -194,6 +198,7 @@ class FastSAMPrompt:
             return None
         result = self.plot_to_result(
             annotations, 
+            scores,
             bboxes, 
             points, 
             point_label, 
@@ -215,6 +220,7 @@ class FastSAMPrompt:
         annotation,
         ax,
         random_color=False,
+        scores = None,
         bboxes=None,
         points=None,
         pointlabel=None,
@@ -244,7 +250,19 @@ class FastSAMPrompt:
         indices = (index[h_indices, w_indices], h_indices, w_indices, slice(None))
         # Use vectorized indexing to update the values of 'show'.
         show[h_indices, w_indices, :] = mask_image[indices]
-        if bboxes is not None:
+        
+        if scores is not None and annotation is not None:
+            for i, score in enumerate(scores):
+                bbox = self._get_bbox_from_mask(annotation[i])
+                x1, y1, x2, y2 = bbox
+                ax.text(
+                    x1, y1 - 5, f"{score:.2f}",
+                    color='b',
+                    fontsize=10,
+                )
+                ax.add_patch(plt.Rectangle((x1, y1), x2 - x1, y2 - y1, fill=False, edgecolor='b', linewidth=1))
+        
+        elif bboxes is not None:
             for bbox in bboxes:
                 x1, y1, x2, y2 = bbox
                 ax.add_patch(plt.Rectangle((x1, y1), x2 - x1, y2 - y1, fill=False, edgecolor='b', linewidth=1))
@@ -272,6 +290,7 @@ class FastSAMPrompt:
         annotation,
         ax,
         random_color=False,
+        scores=None,
         bboxes=None,
         points=None,
         pointlabel=None,
@@ -305,7 +324,18 @@ class FastSAMPrompt:
         # Use vectorized indexing to update the values of 'show'.
         show[h_indices, w_indices, :] = mask_image[indices]
         show_cpu = show.cpu().numpy()
-        if bboxes is not None:
+        if scores is not None and annotation is not None:
+            for i, score in enumerate(scores):
+                bbox = self._get_bbox_from_mask(annotation[i])
+                x1, y1, x2, y2 = bbox
+                ax.text(
+                    x1, y1 - 5, f"{score:.2f}",
+                    color='b',
+                    fontsize=10,
+                )
+                ax.add_patch(plt.Rectangle((x1, y1), x2 - x1, y2 - y1, fill=False, edgecolor='b', linewidth=1))
+        
+        elif bboxes is not None:
             for bbox in bboxes:
                 x1, y1, x2, y2 = bbox
                 ax.add_patch(plt.Rectangle((x1, y1), x2 - x1, y2 - y1, fill=False, edgecolor='b', linewidth=1))
@@ -440,14 +470,31 @@ class FastSAMPrompt:
     def text_prompt(self, text):
         if self.results == None:
             return []
+        try:
+           import clip  # for linear_assignment
+    
+        except (ImportError, AssertionError, AttributeError):
+           from ultralytics.yolo.utils.checks import check_requirements
+    
+           check_requirements('git+https://github.com/openai/CLIP.git')  # required before installing lap from source
+           import clip
         format_results = self._format_results(self.results[0], 0)
         cropped_boxes, cropped_images, not_crop, filter_id, annotations = self._crop_image(format_results)
         clip_model, preprocess = clip.load('ViT-B/32', device=self.device)
         scores = self.retrieve(clip_model, preprocess, cropped_boxes, text, device=self.device)
-        max_idx = scores.argsort()
-        max_idx = max_idx[-1]
-        max_idx += sum(np.array(filter_id) <= int(max_idx))
-        return np.array([annotations[max_idx]['segmentation']])
+        # todo: use dynamic threshold, instead of top-K
+        # todo: NMS
+        sorted_idx = scores.argsort()[-5:]
+        shifted_idx = []
+        for idx in sorted_idx:
+            idx += sum(np.array(filter_id) <= int(idx))
+            shifted_idx.append(idx)
+            
+        return np.array([annotations[i]['segmentation'] for i in shifted_idx]), np.array([scores[i] for i in shifted_idx])
+        # max_idx = scores.argsort()
+        # max_idx = max_idx[-1]
+        # max_idx += sum(np.array(filter_id) <= int(max_idx))
+        # return np.array([annotations[max_idx]['segmentation']])
 
     def everything_prompt(self):
         if self.results == None:

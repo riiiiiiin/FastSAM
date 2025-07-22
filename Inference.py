@@ -87,6 +87,7 @@ def main(args):
         conf=args.conf,
         iou=args.iou    
         )
+    scores = None
     bboxes = None
     points = None
     point_label = None
@@ -95,7 +96,7 @@ def main(args):
             ann = prompt_process.box_prompt(bboxes=args.box_prompt)
             bboxes = args.box_prompt
     elif args.text_prompt != None:
-        ann = prompt_process.text_prompt(text=args.text_prompt)
+        ann, scores = prompt_process.text_prompt(text=args.text_prompt)
     elif args.point_prompt[0] != [0, 0]:
         ann = prompt_process.point_prompt(
             points=args.point_prompt, pointlabel=args.point_label
@@ -106,6 +107,7 @@ def main(args):
         ann = prompt_process.everything_prompt()
     prompt_process.plot(
         annotations=ann,
+        scores=scores,
         output_path=args.output+args.img_path.split("/")[-1],
         bboxes = bboxes,
         points = points,
