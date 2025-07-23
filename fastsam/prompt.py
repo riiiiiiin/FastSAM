@@ -255,7 +255,7 @@ class FastSAMPrompt:
                 bbox = bboxes[i]
                 x1, y1, x2, y2 = bbox
                 ax.text(
-                    x1 + 2, y1 + 11, f"{score:.2f}",
+                    x1 + 2, y1 + 11, f"{score:.4f}",
                     color='b',
                     fontsize=8,
                 )
@@ -328,7 +328,7 @@ class FastSAMPrompt:
                 bbox = bboxes[i]
                 x1, y1, x2, y2 = bbox
                 ax.text(
-                    x1 + 2, y1 + 11, f"{score:.2f}",
+                    x1 + 2, y1 + 11, f"{score:.4f}",
                     color='b',
                     fontsize=8,
                 )
@@ -376,8 +376,10 @@ class FastSAMPrompt:
         text_features = model.encode_text(tokenized_text)
         image_features /= image_features.norm(dim=-1, keepdim=True)
         text_features /= text_features.norm(dim=-1, keepdim=True)
-        probs = 100.0 * image_features @ text_features.T
-        return probs[:, 0].softmax(dim=0)
+        # TODO: tweak the alpha value to prevent the model too focused on the best candidate
+        probs = 30 * image_features @ text_features.T
+        return probs[:, 0]\
+                .softmax(dim=0)
 
     def _crop_image(self, format_results):
 
@@ -393,11 +395,10 @@ class FastSAMPrompt:
         filter_id = []
         # annotations, _ = filter_masks(annotations)
         # filter_id = list(_)
-        for _, mask in enumerate(annotations):
+        for i, mask in enumerate(annotations):
             if np.sum(mask['segmentation']) <= 100:
-                filter_id.append(_)
+                filter_id.append(i)
                 continue
-            # TODO: use mask to crop image
             bbox = self._get_bbox_from_mask(mask['segmentation'])  # mask 的 bbox
             cropped_images.append(self._segment_image(image, mask['segmentation']))  
             # cropped_boxes.append(segment_image(image,mask["segmentation"]))
@@ -481,10 +482,10 @@ class FastSAMPrompt:
         format_results = self._format_results(self.results[0], 0)
         cropped_images, cropped_boxes, not_crop, filter_id, annotations = self._crop_image(format_results)
         annotations = [annotations[i] for i in range(len(annotations)) if i not in filter_id]
+        
         clip_model, preprocess = clip.load('ViT-B/32', device=self.device)
         scores = self.retrieve(clip_model, preprocess, cropped_images, text, device=self.device)
-        
-        anno_cnt = len(scores)
+        scores = np.array(scores)
         
         # NMS
         tau_Ioi = 0.5
@@ -496,6 +497,7 @@ class FastSAMPrompt:
         for idx in area_sorted_idx:
             should_keep = True
             for j in kept_idx:
+                if scores[idx] > scores[j] * 1.5 : continue
                 area_inter = np.sum(masks[idx] & masks[j])
                 Ioi = area_inter * 1.0 / areas[idx]
                 if Ioi > tau_Ioi:
@@ -507,10 +509,19 @@ class FastSAMPrompt:
                     break
             if should_keep:
                 kept_idx.append(idx)
-                
-        # top 50%
-        threshold = 0.8/anno_cnt
-        selected = [idx for idx in kept_idx if scores[idx] > threshold]
+            
+        # NMS disabled    
+        # kept_idx = range(len(masks))     
+        
+        cropped_boxes = [cropped_boxes[i] for i in kept_idx]
+        cropped_images = [cropped_images[i] for i in kept_idx]
+        masks = [masks[i] for i in kept_idx]
+        scores = [scores[i] for i in kept_idx]
+        
+        anno_cnt = len(scores)
+        # TODO: choose a better selecting method
+        threshold = 0.7/anno_cnt
+        selected = [idx for idx in range(anno_cnt) if scores[idx] > threshold]
         
         return np.array([masks[i] for i in selected]), \
                np.array([cropped_boxes[i] for i in selected]), \
